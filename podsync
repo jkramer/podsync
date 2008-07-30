@@ -1,0 +1,129 @@
+#!/bin/bash
+# makeogg, Copyright (C) 2008 by Jonas Kramer.
+# Published under the terms of the GNU General Public License (GPL).
+
+QUIET="0"
+CLEAR="0"
+
+
+
+for XSLT in "/usr/share/podsync/parse.xsl" "`dirname "$0"`/parse.xsl"; do # HACK! FIX!
+	[ -f "$XSLT" ] && break
+done
+
+if [ ! -f "$XSLT" ]; then
+	echo "XSLT parse file not found." >&2
+	exit -1
+fi
+
+LOG="/dev/null"
+
+for PROGRAM in "xsltproc" "wget" "sed" "mktemp" "rm" "cat"; do
+	PROGPATH="`which "$PROGRAM" 2>$LOG`"
+	if [ -z "$PROGPATH" ]; then
+		echo "$PROGRAM is not in your \$PATH." >&2
+		exit -1
+	fi
+	export $PROGRAM="$PROGPATH"
+done
+
+
+while getopts ":qhc" OPTION; do
+	case $OPTION in
+		"q") QUIET="1" ;;
+		"c") CLEAR="1" ;;
+		"?")
+			echo "Unknown option -$OPTARG."
+			exit -1
+			;;
+		":")
+			echo "Missing argument for option -$OPTOPT."
+			exit -1
+			;;
+		"h")
+			$cat <<EOT
+Usage: `basename "$0"` [-q|-h]
+
+  -h  Print this help and exit.
+  -q  Don't print progress information, only errors if occuring.
+  -c  Don't download anything, just mark all podcasts as "listened".
+
+
+  HOW IT WORKS
+
+Export \$PODSYNCHOME so it points to the directory you want to use for syncing
+podcasts, or leave it empty if you're fine with the default ("\$HOME/podsync/").
+Create a text file named "podcasts.txt" in that directory with the URLs of the
+podcast feeds in it, one per line. Then run podsync and watch it download your
+podcasts.
+
+EOT
+			exit
+			;;
+	esac
+done
+
+
+
+# Default home directory.
+if [ -z "$PODSYNCHOME" ]; then
+	export PODSYNCHOME="$HOME/podsync"
+fi
+
+# Create home if not existing already.
+if [ ! -d "$PODSYNCHOME" ]; then
+	if ! mkdir "$PODSYNCHOME" 2>$LOG; then
+		echo "Failed to create home directory ($PODSYNCHOME)." >&2
+		exit -1
+	fi
+fi
+
+# Check for podcast list.
+if [ ! -f "$PODSYNCHOME/podcasts.txt" ]; then
+	echo "No podcast list found in base directory." >&2
+	exit -1
+fi
+
+HISTORY="$PODSYNCHOME/history.txt"
+
+while read FEEDURL; do
+	FEED="`mktemp`"
+	$wget -q -O "$FEED" "$FEEDURL"
+	$xsltproc $XSLT $FEED | while read SEPARATOR; do
+		read PODCAST
+		read ITEMURL
+		read ITEMNAME
+
+		PODCAST="${PODCAST#PODCAST:}"
+		ITEMURL="${ITEMURL#ITEMURL:}"
+		ITEMNAME="${ITEMNAME#ITEMNAME:}"
+
+		if [ -f "$HISTORY" ]; then
+			if grep -q '^'"$ITEMURL"'$' "$HISTORY"; then
+				continue
+			fi
+		fi
+
+		if [ "$CLEAR" -ne 0 ]; then
+			echo "$ITEMURL" >> "$HISTORY"
+			continue
+		fi
+
+		TMP="`mktemp`"
+
+		[ "$QUIET" -eq 0 ] && echo -n "Loading '$ITEMURL' ... " >&2
+		$wget -q -O "$TMP" "$ITEMURL" >$LOG 2>&1
+		if [ $? -ne 0 ]; then
+			[ "$QUIET" -eq 0 ] && echo 'ERROR' >&2
+			rm -f "$TMP"
+		else
+			[ "$QUIET" -eq 0 ] && echo 'OK' >&2
+			ESCAPEDPODCAST="${PODCAST//[\`\/\'\"]/_}"
+			ESCAPEDITEM="${ITEMNAME//[\`\/\'\"]/_}"
+			mkdir -p "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST"
+			mv "$TMP" "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST/$ESCAPEDITEM"
+			echo "$ITEMURL" >> "$HISTORY"
+		fi
+	done
+	rm "$FEED"
+done < "$PODSYNCHOME/podcasts.txt"
