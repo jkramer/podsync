@@ -2,51 +2,62 @@
 # makeogg, Copyright (C) 2008 by Jonas Kramer.
 # Published under the terms of the GNU General Public License (GPL).
 
-QUIET="0"
-CLEAR="0"
 
+function error ()
+{
+	echo $@ >&2
+}
 
-
-for XSLT in "/usr/share/podsync/parse.xsl" "`dirname "$0"`/parse.xsl"; do # HACK! FIX!
-	[ -f "$XSLT" ] && break
-done
-
-if [ ! -f "$XSLT" ]; then
-	echo "XSLT parse file not found." >&2
+function die ()
+{
+	error $@
 	exit -1
-fi
+}
+
+function verbose ()
+{
+	if [ "$VERBOSE" -ne 0 ]; then
+		echo -e "$@"
+	fi
+}
+
+
+CLEAR=0
+VERBOSE=0
+
 
 LOG="/dev/null"
 
-for PROGRAM in "xsltproc" "wget" "sed" "mktemp" "rm" "cat"; do
-	PROGPATH="`which "$PROGRAM" 2>$LOG`"
-	if [ -z "$PROGPATH" ]; then
-		echo "$PROGRAM is not in your \$PATH." >&2
-		exit -1
-	fi
-	export $PROGRAM="$PROGPATH"
-done
-
-
-while getopts ":qhc" OPTION; do
+while getopts ":qhcH:v" OPTION; do
 	case $OPTION in
-		"q") QUIET="1" ;;
-		"c") CLEAR="1" ;;
+		"v")
+			VERBOSE=1
+			;;
+
+		"c")
+			CLEAR=1
+			;;
+
+		"H")
+			PODSYNCHOME="$OPTARG"
+			;;
+
 		"?")
-			echo "Unknown option -$OPTARG."
-			exit -1
+			die "Unknown option -$OPTARG."
 			;;
+
 		":")
-			echo "Missing argument for option -$OPTOPT."
-			exit -1
+			die "Missing argument for option -$OPTARG."
 			;;
+
 		"h")
 			$cat <<EOT
 Usage: `basename "$0"` [-q|-h]
 
   -h  Print this help and exit.
-  -q  Don't print progress information, only errors if occuring.
   -c  Don't download anything, just mark all podcasts as "listened".
+  -H  Use the argument of this option as the home directory.
+  -v  Be verbose.
 
 
   HOW IT WORKS
@@ -64,31 +75,63 @@ EOT
 done
 
 
+# Check if all required tools are in $PATH.
+verbose -n "Checking availablity of required tools... "
+for PROGRAM in "xsltproc" "wget" "sed" "mktemp" "rm" "cat"; do
+	PROGPATH="`which "$PROGRAM" 2>$LOG`"
+	if [ -z "$PROGPATH" ]; then
+		die "$PROGRAM is not in your \$PATH."
+	fi
+	export $PROGRAM="$PROGPATH"
+done
+verbose "OK."
+
 
 # Default home directory.
 if [ -z "$PODSYNCHOME" ]; then
 	export PODSYNCHOME="$HOME/podsync"
 fi
 
-# Create home if not existing already.
-if [ ! -d "$PODSYNCHOME" ]; then
-	if ! mkdir "$PODSYNCHOME" 2>$LOG; then
-		echo "Failed to create home directory ($PODSYNCHOME)." >&2
-		exit -1
-	fi
-fi
+[ -d "$PODSYNCHOME" ] || die "Home directory ('$PODSYNCHOME') does not exist."
+
+verbose "Home is '$PODSYNCHOME'."
 
 # Check for podcast list.
 if [ ! -f "$PODSYNCHOME/podcasts.txt" ]; then
-	echo "No podcast list found in base directory." >&2
-	exit -1
+	die "No podcast list found in base directory."
 fi
 
+
+# Check for RSS parse XSLT script.
+verbose -n 'Checking for XSLT script... '
+for XSLT in "/usr/share/podsync/parse.xsl" "`dirname "$0"`/parse.xsl"; do
+	[ -f "$XSLT" ] && break
+done
+
+if [ ! -f "$XSLT" ]; then
+	die "XSLT parse file not found."
+fi
+verbose "found ('$XSLT')."
+
 HISTORY="$PODSYNCHOME/history.txt"
+verbose "History is at '$HISTORY'."
 
 while read FEEDURL; do
 	FEED="`mktemp`"
+
+	verbose -n "Fetching '$FEEDURL'... "
 	$wget -q -O "$FEED" "$FEEDURL"
+
+	if [ "$?" -ne 0 ]; then
+		verbose 'failed!'
+		error "Error while fetching feed '$FEEDURL'."
+		continue
+	else
+		verbose 'OK.'
+	fi
+
+	COUNT=0
+
 	$xsltproc $XSLT $FEED | while read SEPARATOR; do
 		read PODCAST
 		read ITEMURL
@@ -111,19 +154,27 @@ while read FEEDURL; do
 
 		TMP="`mktemp`"
 
-		[ "$QUIET" -eq 0 ] && echo -n "Loading '$ITEMURL' ... " >&2
+		verbose -n "\tLoading '$ITEMURL' ... "
 		$wget -q -O "$TMP" "$ITEMURL" >$LOG 2>&1
 		if [ $? -ne 0 ]; then
-			[ "$QUIET" -eq 0 ] && echo 'ERROR' >&2
+			verbose 'failed!'
+			error "Download of $ITEMURL failed."
 			rm -f "$TMP"
 		else
-			[ "$QUIET" -eq 0 ] && echo 'OK' >&2
 			ESCAPEDPODCAST="${PODCAST//[\`\/\'\"]/_}"
 			ESCAPEDITEM="${ITEMNAME//[\`\/\'\"]/_}"
 			mkdir -p "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST"
 			mv "$TMP" "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST/$ESCAPEDITEM"
 			echo "$ITEMURL" >> "$HISTORY"
+
+			verbose 'OK.'
+			COUNT=$[$COUNT+1]
 		fi
 	done
+
+	verbose "\t$COUNT item(s) downloaded."
+
 	rm "$FEED"
 done < "$PODSYNCHOME/podcasts.txt"
+
+
