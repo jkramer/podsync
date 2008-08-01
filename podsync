@@ -66,6 +66,7 @@ while getopts ":qhcH:vl:" OPTION; do
 		"l")
 			LIMIT="$OPTARG"
 			int "$LIMIT" || die 'Argument for -l (item limit) must be an integer.'
+			verbose "Limit is $LIMIT."
 			;;
 
 		"?")
@@ -137,14 +138,16 @@ for XSLT in "/usr/share/podsync/parse.xsl" "`dirname "$0"`/parse.xsl"; do
 	[ -f "$XSLT" ] && break
 done
 
-if [ ! -f "$XSLT" ]; then
-	die "XSLT parse file not found."
-fi
+[ -f "$XSLT" ] || die "XSLT parse file not found."
 verbose "found ('$XSLT')."
 
+
+# History file path.
 HISTORY="$PODSYNCHOME/history.txt"
 verbose "History is at '$HISTORY'."
 
+
+# Get all feeds on process their items.
 while read FEEDURL; do
 	FEED="`mktemp`"
 
@@ -161,6 +164,7 @@ while read FEEDURL; do
 
 	COUNT=0
 
+	# Parse feed and process the output of the XSLT script.
 	$xsltproc $XSLT $FEED | while read SEPARATOR; do
 		read PODCAST
 		read ITEMURL
@@ -172,18 +176,20 @@ while read FEEDURL; do
 
 		COUNT=$[$COUNT+1]
 
+		# Skip if the item has been downloaded before.
+		exists "$ITEMURL" || continue
+
 		# If there's an item limit and we're already over it, just add the
 		# items to the history and skip without downloading.
 		if [ ! -z "$LIMIT" ]; then
 			if [ "$COUNT" -gt "$LIMIT" ]; then
-				exists "$ITEMURL" || echo "$ITEMURL" >> "$HISTORY"
+				echo "$ITEMURL" >> "$HISTORY"
 				continue
 			fi
 		fi
 
-		# Skip if the item has been downloaded before.
-		exists "$ITEMURL" || continue
-
+		# In clearing mode, write all items to the history and skip
+		# downloading.
 		if [ "$CLEAR" -ne 0 ]; then
 			echo "$ITEMURL" >> "$HISTORY"
 			continue
@@ -206,12 +212,13 @@ while read FEEDURL; do
 
 			# Append extension.
 			EXTENSION="${ITEMURL##*.}"
-			if [ ! -z "$EXTENSION" ]; then
-				ESCAPEDITEM="$ESCAPEDITEM.$EXTENSION"
-			fi
+			[ ! -z "$EXTENSION" ] && ESCAPEDITEM="$ESCAPEDITEM.$EXTENSION"
 
+			# Move item to the podcast directory.
 			mkdir -p "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST"
 			mv "$TMP" "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST/$ESCAPEDITEM"
+
+			# Add to history.
 			echo "$ITEMURL" >> "$HISTORY"
 
 			verbose 'OK.'
