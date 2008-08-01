@@ -163,6 +163,12 @@ while read FEEDURL; do
 		else
 			ESCAPEDPODCAST="${PODCAST//[\`\/\'\"]/_}"
 			ESCAPEDITEM="${ITEMNAME//[\`\/\'\"]/_}"
+			EXTENSION="${ITEMURL##*.}"
+
+			if [ ! -z "$EXTENSION" ]; then
+				ESCAPEDITEM="$ESCAPEDITEM.$EXTENSION"
+			fi
+
 			mkdir -p "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST"
 			mv "$TMP" "$PODSYNCHOME/podcasts/$ESCAPEDPODCAST/$ESCAPEDITEM"
 			echo "$ITEMURL" >> "$HISTORY"
@@ -176,5 +182,3 @@ while read FEEDURL; do
 
 	rm "$FEED"
 done < "$PODSYNCHOME/podcasts.txt"
-
-
