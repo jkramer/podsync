@@ -3,17 +3,20 @@
 # Published under the terms of the GNU General Public License (GPL).
 
 
+# Print error message.
 function error ()
 {
 	echo $@ >&2
 }
 
+# Print error message and exit.
 function die ()
 {
 	error $@
 	exit -1
 }
 
+# Print stuff in verbose mode.
 function verbose ()
 {
 	if [ "$VERBOSE" -ne 0 ]; then
@@ -21,14 +24,32 @@ function verbose ()
 	fi
 }
 
+# Check if the parameter is an integer.
+function int ()
+{
+	[ "$1" -eq "$1" ] >"/dev/null" 2>&1
+	return $?
+}
+
+
+# Check if a podcast has already been downloaded.
+function exists ()
+{
+	if [ -f "$HISTORY" ]; then
+		if grep -q '^'"$1"'$' "$HISTORY"; then
+			return 1
+		fi
+	fi
+	return 0
+}
+
 
 CLEAR=0
 VERBOSE=0
 
-
 LOG="/dev/null"
 
-while getopts ":qhcH:v" OPTION; do
+while getopts ":qhcH:vl:" OPTION; do
 	case $OPTION in
 		"v")
 			VERBOSE=1
@@ -40,6 +61,11 @@ while getopts ":qhcH:v" OPTION; do
 
 		"H")
 			PODSYNCHOME="$OPTARG"
+			;;
+
+		"l")
+			LIMIT="$OPTARG"
+			int "$LIMIT" || die 'Argument for -l (item limit) must be an integer.'
 			;;
 
 		"?")
@@ -58,6 +84,9 @@ Usage: `basename "$0"` [-q|-h]
   -c  Don't download anything, just mark all podcasts as "listened".
   -H  Use the argument of this option as the home directory.
   -v  Be verbose.
+  -l  Takes an integer as argument and downloads only that number of items from
+      each podcast. All further items are marked as "listened", even if not yet
+      downloaded.
 
 
   HOW IT WORKS
@@ -141,11 +170,19 @@ while read FEEDURL; do
 		ITEMURL="${ITEMURL#ITEMURL:}"
 		ITEMNAME="${ITEMNAME#ITEMNAME:}"
 
-		if [ -f "$HISTORY" ]; then
-			if grep -q '^'"$ITEMURL"'$' "$HISTORY"; then
+		COUNT=$[$COUNT+1]
+
+		# If there's an item limit and we're already over it, just add the
+		# items to the history and skip without downloading.
+		if [ ! -z "$LIMIT" ]; then
+			if [ "$COUNT" -gt "$LIMIT" ]; then
+				exists "$ITEMURL" || echo "$ITEMURL" >> "$HISTORY"
 				continue
 			fi
 		fi
+
+		# Skip if the item has been downloaded before.
+		exists "$ITEMURL" || continue
 
 		if [ "$CLEAR" -ne 0 ]; then
 			echo "$ITEMURL" >> "$HISTORY"
@@ -161,10 +198,14 @@ while read FEEDURL; do
 			error "Download of $ITEMURL failed."
 			rm -f "$TMP"
 		else
+			# Escape podcast name.
 			ESCAPEDPODCAST="${PODCAST//[\`\/\'\"]/_}"
-			ESCAPEDITEM="${ITEMNAME//[\`\/\'\"]/_}"
-			EXTENSION="${ITEMURL##*.}"
 
+			# Escape item name.
+			ESCAPEDITEM="${ITEMNAME//[\`\/\'\"]/_}"
+
+			# Append extension.
+			EXTENSION="${ITEMURL##*.}"
 			if [ ! -z "$EXTENSION" ]; then
 				ESCAPEDITEM="$ESCAPEDITEM.$EXTENSION"
 			fi
@@ -174,11 +215,8 @@ while read FEEDURL; do
 			echo "$ITEMURL" >> "$HISTORY"
 
 			verbose 'OK.'
-			COUNT=$[$COUNT+1]
 		fi
 	done
-
-	verbose "\t$COUNT item(s) downloaded."
 
 	rm "$FEED"
 done < "$PODSYNCHOME/podcasts.txt"
