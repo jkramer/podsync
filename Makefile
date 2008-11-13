@@ -2,7 +2,7 @@
 PREFIX	:= /usr
 
 compile	:
-	@echo "Nothing to compile."
+	@echo "Nothing to do. Just run 'make install' as root."
 
 install	:
 	install -m 755 podsync $(PREFIX)/bin
