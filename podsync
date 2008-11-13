@@ -49,6 +49,16 @@ VERBOSE=0
 
 LOG="/dev/null"
 
+# Check if all required tools are in $PATH.
+for PROGRAM in "xsltproc" "wget" "sed" "mktemp" "rm" "cat"; do
+	PROGPATH="`which "$PROGRAM" 2>$LOG`"
+	if [ -z "$PROGPATH" ]; then
+		die "$PROGRAM is not in your \$PATH."
+	fi
+	export $PROGRAM="$PROGPATH"
+done
+
+
 while getopts ":qhcH:vl:" OPTION; do
 	case $OPTION in
 		"v")
@@ -105,16 +115,6 @@ EOT
 done
 
 
-# Check if all required tools are in $PATH.
-verbose -n "Checking availablity of required tools... "
-for PROGRAM in "xsltproc" "wget" "sed" "mktemp" "rm" "cat"; do
-	PROGPATH="`which "$PROGRAM" 2>$LOG`"
-	if [ -z "$PROGPATH" ]; then
-		die "$PROGRAM is not in your \$PATH."
-	fi
-	export $PROGRAM="$PROGPATH"
-done
-verbose "OK."
 
 
 # Default home directory.
