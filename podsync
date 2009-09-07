@@ -226,4 +226,4 @@ while read FEEDURL; do
 	done
 
 	rm "$FEED"
-done < "$PODSYNCHOME/podcasts.txt"
+done <<<"`grep -v '^#' "$PODSYNCHOME/podcasts.txt"`"
